@@ -1,0 +1,21 @@
+name: 'Centralized Workflow'
+on:
+  workflow_dispatch:
+jobs:
+  # -------------------------------------------------------------
+  # A workflow to be triggered from another repo
+  # --------------------------------------------------------------
+  TodayDateJob:
+
+    runs-on: ubuntu-latest 
+    steps:        
+      - name: Set current date as env variable
+        run: echo "NOW=$(date +'%Y-%m-%dT%H:%M:%S')" >> $GITHUB_ENV
+      - name: Echo current date
+        run: echo $NOW # Gives "2022-12-11T01:42:20"
+      # Echo Repository Name 
+      - name: Current Repo
+        shell: bash
+        run: |
+          echo "This a centralized repo"
+          echo ${{ github.event.repository.name }}
