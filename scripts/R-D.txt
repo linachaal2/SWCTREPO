@@ -1,0 +1,10 @@
+RPTPATH = reports
+LBLPATH = labels/usrint
+MOCAPATH = src/cmdsrc
+JARPATH = javalib
+CSVPATH = db/data/load/base
+MSQLPATH = db/ddl
+HMSQLPATH = db/ddl/prerun
+LMSQLPATH = db/ddl/afterrun
+MTFPATH = mtfclient/src/java/com/redprairie/les/formlogic
+INTPATH = db/data/integrator
