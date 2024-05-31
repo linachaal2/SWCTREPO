@@ -1,0 +1,183 @@
+name: Create BY Rollout Package TAR File
+
+on:
+  pull_request:
+    branches:
+      - main
+ # workflow_dispatch:
+  workflow_call:
+    inputs:
+       customer_name:
+        description: 'Customer Name'
+        required: true
+        type: string
+        default: 'RFH'    
+#concurrency: production
+jobs:
+  # -------------------------------------------------------------
+  # Event `pull_request`: Returns all changed pull request files.
+  # --------------------------------------------------------------
+  changed_files:
+    # NOTE:
+    # - This is limited to pull_request* events and would raise an error for other events.
+    # - A maximum of 3000 files can be returned.
+    # - For more flexibility and no limitations see "Using local .git history" above.
+
+    runs-on: ubuntu-latest #self-hosted 
+    name: Create BY Rollout Package TAR File
+    permissions:
+      pull-requests: write
+      contents: write
+      
+    concurrency:
+      group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+      cancel-in-progress: true
+      
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          
+     # Get Customer Name 
+      - name: Get Customer Var
+        id: get_customer-name
+        shell: bash
+        run: |
+          if ${{ vars.CUSTOMER_NAME != '' }}; then
+            echo "CUSTOMER_NAME=${{ vars.CUSTOMER_NAME }}"  >> $GITHUB_OUTPUT
+          else
+            echo "CUSTOMER_NAME=${{ github.event.inputs.customer_name }}"  >> $GITHUB_OUTPUT
+          fi
+    #  - name: Print Customer Var
+    #    run: |        
+    #     echo "${{ steps.get_customer-name.outputs.CUSTOMER_NAME }}"
+          
+      # Need to check if the commit message contain the bump versioning type  
+      - name: Get Head Commit Message
+        id: get_head_commit_message
+        run: echo "HEAD_COMMIT_MESSAGE=$(git show -s --format=%s)" >> "$GITHUB_OUTPUT"   
+      - uses: actions-ecosystem/action-regex-match@v2
+        id: regex-match
+        with:
+          text: ${{ steps.get_head_commit_message.outputs.HEAD_COMMIT_MESSAGE }}
+          regex: '(?<=#)\S*'    
+      - name: Print regex value      
+        run: |     
+           echo "print match value:${{ steps.regex-match.outputs.match }}" 
+      - name: Get the bump type from GIT commit message
+        id: get_release_bump_type
+        shell: bash
+        run: |
+          if ${{ steps.regex-match.outputs.match != '' }}; then
+            echo "HASH_BUMP_VALUE=${{ steps.regex-match.outputs.match }}"  >> $GITHUB_OUTPUT
+          else
+            echo "HASH_BUMP_VALUE='patch'"  >> $GITHUB_OUTPUT
+          fi    
+      - name: Print release bump value      
+        run: |     
+           echo "Final Bump Value: ${{ steps.get_release_bump_type.outputs.HASH_BUMP_VALUE }}"
+    
+      # Determine the next version without tagging the branch
+      - name: Bump version for each merge
+        id: taggerDryRun
+        uses: anothrNick/github-tag-action@1.67.0
+        env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+         DEFAULT_BRANCH: ${{ github.head_ref }}
+         WITH_V: true
+         DEFAULT_BUMP: ${{ steps.get_release_bump_type.outputs.HASH_BUMP_VALUE }} 
+         DRY_RUN: true
+      - name: Echo new tag
+        run: |
+         echo "The next tag version will be: ${{ steps.taggerDryRun.outputs.new_tag }}"
+      - name: Echo current tag
+        run: |
+         echo "The current tag is: ${{ steps.taggerDryRun.outputs.tag }}"
+      - name: Echo part
+        run: |
+         echo "The version increment was: ${{ steps.taggerDryRun.outputs.part }}"         
+          
+      # Get list of modifed files for current branch
+      - uses: actions/checkout@v3
+        with:
+         fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+      - name: Get list of changes for current branch
+        id: modified-list
+        run: |        
+          if ${{ github.event_name == 'pull_request' }}; then
+           echo "modified_files=$(git diff --name-status  -r HEAD^1 HEAD | xargs)" >> $GITHUB_OUTPUT
+          else
+           echo "modified_files=$(git diff  --name-status ${{ github.event.before }} ${{ github.event.after }} | xargs)" >> $GITHUB_OUTPUT
+          fi
+       #  - name: List changed files
+       #    run: |
+       #      for file in ${{ steps.changed-files.outputs.changed_files }}; do
+       #       echo "$file"
+       #     done     
+
+      # Create the BY rollout package TAR file
+      - name: Check out the repository to the runner
+        uses: actions/checkout@v4  
+      - name: Execute Perl to create the BY rollout package TAR file
+        run: |
+         perl ${{ github.workspace }}/scripts/createRolloutPackage.pl \
+             -c ${{ steps.get_customer-name.outputs.CUSTOMER_NAME }} \
+             -g "${{ steps.modified-list.outputs.modified_files }}" \
+             -t "${{ github.workspace }}" \
+             -n "${{ github.head_ref }}-${{ steps.taggerDryRun.outputs.new_tag }}" \
+             -d rollout \
+             -z rollout_gen \
+             -b "${{ github.head_ref }}" \
+             -r inputFile.txt \
+             -f \
+             -l ${{ github.head_ref }}.log \
+             -p \
+             -o \
+             -m
+      
+      # Upload the TAR file as an artifact for debugging
+      - name: Upload TAR file
+        id: tar-file
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-tar-file
+          path: ${{ github.workspace }}/rollout_gen/${{ github.head_ref }}/${{ github.head_ref }}-${{ steps.taggerDryRun.outputs.new_tag }}.tar
+      
+      # Push and Commit the TAR file into the GIT repository
+      - name: Push and Commit the TAR file into the GIT repository
+        run: |
+          # Stage the file, commit and push
+          git config --global user.email ${{ github.actor }}[bot]@users.noreply.github.com
+          git config --global user.name ${{ github.actor }}
+          git switch ${{ github.head_ref }}
+          git add -f .
+          git commit -m "Create package ${{ github.head_ref }}-${{ steps.taggerDryRun.outputs.new_tag }}.tar "
+          git push 
+
+      # Tag the branch with the bump versioning passed in the commit message or Patch by default    
+      - name: Tag branch
+        id: taggerFinal
+        uses: anothrNick/github-tag-action@1.67.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.head_ref }}
+          WITH_V: true
+          DEFAULT_BUMP: ${{ steps.get_release_bump_type.outputs.HASH_BUMP_VALUE }}
+      # - name: Create release notes
+      #   id: release_notes
+      #   run: gh release create ${{ steps.taggerFinal.outputs.new_tag }} --generate-notes
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Creating a release and upload the asset
+      - name: Create a new release and upload the asset
+        uses: ncipollo/release-action@v1
+        with:
+         artifacts:  ${{ github.workspace }}/rollout_gen/${{ github.head_ref }}/${{ github.head_ref }}-${{ steps.taggerDryRun.outputs.new_tag }}.tar
+         tag: ${{ steps.taggerFinal.outputs.new_tag }}
+      
+  
+    
+          
+     
