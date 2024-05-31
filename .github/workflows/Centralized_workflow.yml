@@ -1,6 +1,7 @@
 name: 'Centralized Workflow'
 on:
-  workflow_call:
+ workflow_dispatch:
+ # workflow_call:
 jobs:
   # -------------------------------------------------------------
   # A workflow to be triggered from another repo
