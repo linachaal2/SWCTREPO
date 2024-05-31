@@ -1,6 +1,5 @@
 name: 'Centralized Workflow'
-on:
- workflow_dispatch:
+on: [workflow_dispatch, workflow_call]
  # workflow_call:
 jobs:
   # -------------------------------------------------------------
